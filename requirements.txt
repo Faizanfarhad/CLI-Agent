@@ -1,0 +1,8 @@
+ollama
+docker
+PyMuPDF
+sentence-transformers
+faiss-cpu
+llama-index-core
+numpy
+torch

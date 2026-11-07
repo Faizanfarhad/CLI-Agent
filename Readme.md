@@ -23,29 +23,15 @@ searching saved project memory.
   artifacts when no destination is specified. A user-specified path takes priority.
 
 ## Requirements
-
-- Linux (the Docker playground uses a Linux image).
-- Python 3.10 or later. Python 3.11 is used in the playground image.
-- A running Ollama service and a locally available model matching `MODEL_NAME` in
+- Linux.
+- Python 3.10 or later.
+- Ollama installed and running, with a local model matching `MODEL_NAME` in
   `config.py`.
-- Docker Engine, permission to access the Docker daemon, and the `agent-sandbox`
-  image built as described below.
-- Enough host RAM and disk for Python dependencies, the embedding model, and the
-  Ollama model. The playground container itself is limited to 512 MB RAM and one
-  CPU core.
-
-There is currently no `requirements.txt` or `pyproject.toml`. The Python
-environment needs these project dependencies:
-
-```bash
-python -m pip install ollama docker pymupdf sentence-transformers \
-  faiss-cpu llama-index-core
-```
-
-`sentence-transformers` installs PyTorch as a dependency in typical environments;
-the RAG retrieval code also imports `torch` directly. If dependency installation
-does not provide a compatible PyTorch build for your platform, install the
-appropriate PyTorch build following the official PyTorch instructions.
+- Docker Engine running, with permission for your user to access the Docker
+  daemon.
+- Python dependencies listed in [`requirements.txt`](requirements.txt). Install
+  them in a virtual environment using the commands in [Run the agent](#run-the-agent).
+- The `agent-sandbox` Docker image. See [Build the Docker playground image](#build-the-docker-playground-image).
 
 ## Configuration
 
@@ -119,8 +105,23 @@ Docker socket world-writable.
 
 ## Run the agent
 
-Activate the Python environment that has the dependencies installed, change to
-the repository root, and run:
+Use Python 3.10 or later on Linux. From the repository root, create and activate
+a virtual environment, then install the packages listed in `requirements.txt`:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+`sentence-transformers` uses PyTorch; `torch` is also listed explicitly because
+the retrieval code imports it directly. If pip cannot find a compatible PyTorch
+wheel for your platform, install the appropriate build following the official
+PyTorch installation instructions.
+
+After installing dependencies, make sure Ollama is running, build the Docker
+playground image as described above, and run the agent from the repository root:
 
 ```bash
 python Agent.py
