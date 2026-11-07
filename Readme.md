@@ -1,5 +1,5 @@
 
-# Local Ollama Tool-Calling Agent v1
+# CLI Agent [v1]
 
 A command-line AI agent that uses a locally running Ollama model, streams responses
 and thinking output, and can call local file-system tools and a Docker playground.
