@@ -1,0 +1,15 @@
+#project/context
+## Testing/Maze_Game
+- Header file for maze solver.
+
+#decisions and preferences
+- Use header guard MAZE_SOLVER_H.
+- Basic I/O functions declaration.
+
+#completed work
+- Header file content read.
+- Added code playground structure and basic script to compile and test.
+
+#open tasks
+- Ensure header guard, missing semicolons and proper declarations.
+- Implement comprehensive CI integration and documentation.

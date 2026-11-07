@@ -1,0 +1,16 @@
+FROM python:3.11-slim
+
+
+# Install standard Linux utilities the agent might need
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    build-essential \
+    jq \
+    && rm -rf /var/lib/apt/lists/*
+
+    # Set a working directory for the agent's tasks
+    WORKDIR /playground
+    
+    # Keep the container alive indefinitely so the agent can interact with it
+    CMD ["sleep", "infinity"]
