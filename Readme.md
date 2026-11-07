@@ -252,4 +252,4 @@ inspect Ollama service logs for details.
 
 ### The Local Model that i used 
 - [GPT-oss-20b Uncensored](https://huggingface.co/DavidAU/OpenAi-GPT-oss-20b-abliterated-uncensored-NEO-Imatrix-gguf)
-- [Qwen3.8-27b-4bit-Uncensored](https://huggingface.co/DavidAU/Qwen3. 8-27B-TURBO-Fable-Cold-Fusion-735-882-Heretic-Uncensored-NEO-CODER-MAX-MTP-GGUF)
+- [Gemma3-27b-4bit-Uncensored](https://huggingface.co/llmfan46/gemma-3-27b-it-ultra-uncensored-heretic-GGUF)
