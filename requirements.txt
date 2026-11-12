@@ -6,3 +6,4 @@ faiss-cpu
 llama-index-core
 numpy
 torch
+sqlite3

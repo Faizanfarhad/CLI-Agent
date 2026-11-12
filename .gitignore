@@ -5,3 +5,15 @@
 testing/
 
 savedMem/code_playground_setup.md
+
+savedMem/chat_summary/
+
+savedMem/voice_chat_saved/
+
+savedMem/agent_memory.db
+
+savedMem/
+
+tools/voice_chat.py
+
+

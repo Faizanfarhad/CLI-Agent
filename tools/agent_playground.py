@@ -16,7 +16,17 @@ class AgentLinuxEnv:
             tty=True,
             network_mode="bridge", # Limits network if needed
             mem_limit="512m",      # Prevents agent from freezing host RAM
-            nano_cpus=1000000000   # Limits agent to 1 CPU core
+            nano_cpus=1000000000,   # Limits agent to 1 CPU core
+            volumes={
+    "/mnt/storage/Agent_using_MCP": {
+        "bind": "/workspace",
+        "mode": "ro",
+    },
+    "/mnt/storage/Agent_using_MCP/testing": {
+        "bind": "/workspace/testing",
+        "mode": "rw",
+    },
+}
         )
         return self.container.id
 

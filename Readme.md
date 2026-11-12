@@ -170,6 +170,7 @@ model if it appears in the `tools` list and has a matching entry in
 The default memory paths are defined in `config.py`:
 
 - `savedMem/memory.md` is the source document.
+- `savedMem/agent_memory.db` stores durable SQLite memories.
 - `savedMem/` is created by the agent if it does not exist.
 
 At startup, `Agent.py` creates a `RagPipelineConnector` over `memory.md`. The
@@ -179,14 +180,24 @@ is limited to 900 characters before it is added to the model's system message.
 Tool results included in subsequent model messages are limited to 1,600
 characters, and the agent stops after six tool rounds(can be configure inside the config.py).
 
+Before each user request, the agent also searches the SQLite database for up to
+three matching active, unexpired long-term memories and includes them in the
+system message, limited to 900 characters per entry. The `persist_long_term_memory`
+tool writes durable entries to this database; the agent does not load the entire
+database into the prompt.
+
 When the model calls `write` for `savedMem/memory.md`, the wrapper refreshes the
 RAG index after the write. Other file writes do not refresh it. The RAG index is
 in memory and is rebuilt from the complete memory file at startup and after a
 memory-file update.
 
-Memory retrieval does not automatically summarize or update memory after every
-chat. The system prompt instructs the model to update durable notes, but this is
-an instruction to the model, not an application-enforced automatic save.
+After a completed response, the application makes a separate structured memory
+review call. It saves only concise durable preferences, decisions, project
+facts, or tool-confirmed outcomes to SQLite; routine requests and full
+transcripts are not stored. Invalid extraction or database errors are reported
+instead of being presented as a successful save. The model can also use
+`persist_long_term_memory` during a task when a durable fact must be saved
+before the final response.
 
 ## Project layout
 
