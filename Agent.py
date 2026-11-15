@@ -1,5 +1,3 @@
- #hf_repo : https://huggingface.co/DavidAU/OpenAi-GPT-oss-20b-abliterated-uncensored-NEO-Imatrix-gguf
-
 import json
 import sqlite3
 from pathlib import Path
@@ -29,6 +27,12 @@ from relevantMemoryFetch.rag_pipeline import RagPipelineConnector
 
 from tools.agent_playground import AgentLinuxEnv,playground
 from tools.save_memory import (
+    close_session,
+    create_session,
+    list_sessions,
+    load_recent_messages,
+    resume_session,
+    save_chat_turn,
     save_long_term_memory,
     save_long_term_memories,
     search_long_term_memories,
@@ -37,6 +41,7 @@ from tools.save_memory import (
 #load the docker env for the agent playground
 playground_env = AgentLinuxEnv()
 playground_env.start()
+active_session_id: int | None = None
 
 # Rag pipeline for agent to load memory efficiently if needed
 MEMORY_DIR.mkdir(parents=True, exist_ok=True)
@@ -82,6 +87,7 @@ def review_and_save_durable_memories(
     query: str,
     answer: str,
     tool_results: list[str],
+    session_id: int,
 ) -> str:
     response = ollama.chat(
         model=MODEL_NAME,
@@ -138,6 +144,8 @@ def review_and_save_durable_memories(
         if not {"content", "category", "importance"} <= memory.keys():
             raise ValueError("Memory review entry is missing required fields.")
 
+    for memory in memories:
+        memory["source_session_id"] = session_id
     memory_ids = save_long_term_memories(memories)
     if not memory_ids:
         return "Memory review complete; no durable information to save."
@@ -216,6 +224,21 @@ def run_in_playground(
     )
 
 
+def save_memory_for_active_session(
+    content: str,
+    category: str = "other",
+    importance: int = 3,
+) -> str:
+    if active_session_id is None:
+        raise RuntimeError("Cannot save memory without an active conversation session.")
+    return save_long_term_memory(
+        content=content,
+        category=category,
+        importance=importance,
+        source_session_id=active_session_id,
+    )
+
+
 tools = [
     read_file,
     read_pdf,
@@ -252,11 +275,11 @@ available_functions = {
     "playground":run_in_playground,
 
     #long term memory tool
-    "persist_long_term_memory": save_long_term_memory,
+    "persist_long_term_memory": save_memory_for_active_session,
 
 }
 
-def tool_call(query):
+def tool_call(query, session_id: int):
     retrieved = pipeline.query(query).get("Top_relevant_memory_chunks", [])
     relevant_memory = [
         {
@@ -285,8 +308,9 @@ def tool_call(query):
                 f"{json.dumps(relevant_sqlite_memories, ensure_ascii=False)}"
             ),
         },
-        {"role": "user", "content": query},
     ]
+    messages.extend(load_recent_messages(session_id))
+    messages.append({"role": "user", "content": query})
 
     tool_results = []
     for _ in range(MAX_TOOL_ROUNDS):
@@ -330,9 +354,10 @@ def tool_call(query):
         if assistant_message is None:
             final_answer = "".join(response_parts).strip()
             if final_answer:
+                save_chat_turn(session_id, query, final_answer)
                 try:
                     memory_status = review_and_save_durable_memories(
-                        query, final_answer, tool_results
+                        query, final_answer, tool_results, session_id
                     )
                 except (
                     httpx.HTTPError,
@@ -357,11 +382,13 @@ def tool_call(query):
 
             result = function(**tool_call.function.arguments)
             result_text = str(result)
+
             if len(result_text) > MAX_TOOL_RESULT_CHARS:
                 result_text = (
                     result_text[:MAX_TOOL_RESULT_CHARS]
                     + "\n[Tool output truncated to limit context size.]"
                 )
+
             tool_results.append(result_text)
             messages.append({
                 "role": "tool",
@@ -375,18 +402,71 @@ def tool_call(query):
         flush=True,
     )
 
-def chat(query):
-    tool_call(query)
+def chat(query, session_id: int):
+    tool_call(query, session_id)
 
 
-# making it work as a chatbot 
-want_to_talk = True
-print(f"{'=' * 50}Ask Something{'=' * 50}")
-while want_to_talk:
-    query = input("\nEnter you query(type '/exit' to quit):")
-    if query.strip().lower() == "/exit":
-        want_to_talk = False
-        print("\nUnderstood. Closing session. Have a great day!")
-        playground_env.stop()
-    else:
-        chat(query)
+# making it work as a chatbot
+def main():
+    global active_session_id
+
+    active_session_id = create_session()
+    print(f"{'=' * 50}Ask Something{'=' * 50}")
+    try:
+        while True:
+            query = input(
+                f"\n[session {active_session_id}] Enter query "
+                "('/sessions', '/sessions <id>', '/new', '/exit'): "
+            ).strip()
+            if query.lower() == "/exit":
+                print("\nUnderstood. Closing session. Have a great day!")
+                break
+
+            if query == "/sessions":
+                sessions = list_sessions()
+                if not sessions:
+                    print("No saved sessions yet.")
+                    continue
+                print("Saved sessions:")
+                for session in sessions:
+                    print(
+                        f"  {session['id']}: {session['title']} "
+                        f"(last active {session['last_activity']})"
+                    )
+                continue
+
+            if query.startswith("/sessions "):
+                try:
+                    selected_session_id = int(query.removeprefix("/sessions ").strip())
+                    if selected_session_id == active_session_id:
+                        print(f"Session {active_session_id} is already active.")
+                        continue
+                    resume_session(selected_session_id)
+                    close_session(active_session_id)
+                except (ValueError, sqlite3.Error) as error:
+                    print(f"Could not resume session: {error}")
+                    continue
+                active_session_id = selected_session_id
+                print(f"Resumed session {active_session_id}.")
+                continue
+
+            if query == "/new":
+                close_session(active_session_id)
+                active_session_id = create_session()
+                print(f"Started new session {active_session_id}.")
+                continue
+
+            if query.startswith("/"):
+                print("Unknown command. Use /sessions, /sessions <id>, /new, or /exit.")
+                continue
+
+            chat(query, active_session_id)
+    finally:
+        try:
+            if active_session_id is not None:
+                close_session(active_session_id)
+        finally:
+            playground_env.stop()
+
+if __name__ == '__main__':
+    main()

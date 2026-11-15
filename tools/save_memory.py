@@ -89,15 +89,185 @@ def get_connection(
     return connection
 
 
+def create_session(db_path: str | Path = DATABASE_PATH) -> int:
+    """Create and return a new conversation session."""
+    connection = get_connection(db_path)
+    try:
+        cursor = connection.execute("INSERT INTO sessions DEFAULT VALUES")
+        connection.commit()
+        return int(cursor.lastrowid)
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
+def list_sessions(
+    limit: int = 20,
+    db_path: str | Path = DATABASE_PATH,
+) -> list[dict[str, object]]:
+    """List non-empty sessions, newest activity first."""
+    if limit < 1:
+        raise ValueError("Session list limit must be at least 1.")
+
+    connection = get_connection(db_path)
+    try:
+        rows = connection.execute(
+            """
+            SELECT
+                s.id,
+                s.started_at,
+                s.ended_at,
+                COALESCE(
+                    (
+                        SELECT substr(m.content, 1, 80)
+                        FROM messages AS m
+                        WHERE m.session_id = s.id AND m.role = 'user'
+                        ORDER BY m.id
+                        LIMIT 1
+                    ),
+                    '(empty session)'
+                ) AS title,
+                COALESCE(
+                    (
+                        SELECT m.created_at
+                        FROM messages AS m
+                        WHERE m.session_id = s.id
+                        ORDER BY m.id DESC
+                        LIMIT 1
+                    ),
+                    s.started_at
+                ) AS last_activity
+            FROM sessions AS s
+            WHERE EXISTS (
+                SELECT 1 FROM messages AS m
+                WHERE m.session_id = s.id AND m.role = 'user'
+            )
+            ORDER BY last_activity DESC, s.id DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        connection.close()
+
+
+def resume_session(
+    session_id: int,
+    db_path: str | Path = DATABASE_PATH,
+) -> int:
+    """Mark a saved session active and return its recent user/assistant history."""
+    connection = get_connection(db_path)
+    try:
+        cursor = connection.execute(
+            "UPDATE sessions SET ended_at = NULL WHERE id = ?",
+            (session_id,),
+        )
+        if cursor.rowcount == 0:
+            raise ValueError(f"Session {session_id} does not exist.")
+        connection.commit()
+        return session_id
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
+def load_recent_messages(
+    session_id: int,
+    limit: int = 12,
+    db_path: str | Path = DATABASE_PATH,
+) -> list[dict[str, str]]:
+    """Load a bounded recent context, excluding tool-call and tool-output records."""
+    if limit < 1:
+        raise ValueError("Message history limit must be at least 1.")
+
+    connection = get_connection(db_path)
+    try:
+        rows = connection.execute(
+            """
+            SELECT role, content
+            FROM messages
+            WHERE session_id = ? AND role IN ('user', 'assistant')
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (session_id, limit),
+        ).fetchall()
+        return [
+            {"role": row["role"], "content": row["content"]}
+            for row in reversed(rows)
+        ]
+    finally:
+        connection.close()
+
+
+def save_chat_turn(
+    session_id: int,
+    user_message: str,
+    assistant_message: str,
+    db_path: str | Path = DATABASE_PATH,
+) -> None:
+    """Save only the user request and final assistant answer as one atomic turn."""
+    if not user_message.strip() or not assistant_message.strip():
+        raise ValueError("Both user and assistant messages must be non-empty.")
+
+    connection = get_connection(db_path)
+    try:
+        connection.execute(
+            """
+            INSERT INTO messages (session_id, role, content)
+            VALUES (?, 'user', ?), (?, 'assistant', ?)
+            """,
+            (session_id, user_message.strip(), session_id, assistant_message.strip()),
+        )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
+def close_session(
+    session_id: int,
+    db_path: str | Path = DATABASE_PATH,
+) -> None:
+    """Mark a session as ended."""
+    connection = get_connection(db_path)
+    try:
+        cursor = connection.execute(
+            "UPDATE sessions SET ended_at = datetime('now') WHERE id = ?",
+            (session_id,),
+        )
+        if cursor.rowcount == 0:
+            raise ValueError(f"Session {session_id} does not exist.")
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
 def save_long_term_memory(
     content: str,
     category: str = "other",
     importance: int = 3,
     db_path: str | Path = DATABASE_PATH,
+    source_session_id: int | None = None,
 ) -> str:
     """Persist one long-term memory entry and return its database ID."""
     memory_ids = save_long_term_memories(
-        [{"content": content, "category": category, "importance": importance}],
+        [{
+            "content": content,
+            "category": category,
+            "importance": importance,
+            "source_session_id": source_session_id,
+        }],
         db_path=db_path,
     )
     return f"Saved long-term memory (id={memory_ids[0]})."
@@ -108,11 +278,12 @@ def save_long_term_memories(
     db_path: str | Path = DATABASE_PATH,
 ) -> list[int]:
     """Persist validated long-term memories atomically, avoiding exact duplicates."""
-    validated: list[tuple[str, str, int]] = []
+    validated: list[tuple[str, str, int, int | None]] = []
     for memory in memories:
         content = memory.get("content")
         category = memory.get("category", "other")
         importance = memory.get("importance", 3)
+        source_session_id = memory.get("source_session_id")
         if not isinstance(content, str) or not content.strip():
             raise ValueError("Memory content must be a non-empty string.")
         if len(content.strip()) > _MAX_MEMORY_CONTENT_LENGTH:
@@ -127,7 +298,14 @@ def save_long_term_memories(
             or not 1 <= importance <= 5
         ):
             raise ValueError("Memory importance must be an integer from 1 to 5.")
-        validated.append((content.strip(), category, importance))
+        if source_session_id is not None and (
+            not isinstance(source_session_id, int)
+            or isinstance(source_session_id, bool)
+        ):
+            raise ValueError("Source session ID must be an integer or None.")
+        validated.append(
+            (content.strip(), category, importance, source_session_id)
+        )
 
     if not validated:
         return []
@@ -135,7 +313,7 @@ def save_long_term_memories(
     connection = get_connection(db_path)
     try:
         memory_ids = []
-        for content, category, importance in validated:
+        for content, category, importance, source_session_id in validated:
             existing = connection.execute(
                 """
                 SELECT id
@@ -153,18 +331,22 @@ def save_long_term_memories(
                 connection.execute(
                     """
                     UPDATE memories
-                    SET importance = MAX(importance, ?), updated_at = datetime('now')
+                    SET importance = MAX(importance, ?),
+                        source_session_id = COALESCE(source_session_id, ?),
+                        updated_at = datetime('now')
                     WHERE id = ?
                     """,
-                    (importance, memory_id),
+                    (importance, source_session_id, memory_id),
                 )
             else:
                 cursor = connection.execute(
                     """
-                    INSERT INTO memories (memory_type, category, content, importance)
-                    VALUES ('long_term', ?, ?, ?)
+                    INSERT INTO memories (
+                        memory_type, category, content, importance, source_session_id
+                    )
+                    VALUES ('long_term', ?, ?, ?, ?)
                     """,
-                    (category, content, importance),
+                    (category, content, importance, source_session_id),
                 )
                 memory_id = cursor.lastrowid
             memory_ids.append(memory_id)

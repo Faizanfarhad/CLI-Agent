@@ -173,12 +173,30 @@ The default memory paths are defined in `config.py`:
 - `savedMem/agent_memory.db` stores durable SQLite memories.
 - `savedMem/` is created by the agent if it does not exist.
 
+Each program run starts a new conversation session. The CLI accepts:
+
+- `/sessions` to list sessions that contain saved chats.
+- `/sessions <id>` to resume a listed session.
+- `/new` to start another session.
+- `/exit` to close the active session and exit.
+
+The SQLite tables have separate roles: `sessions` identifies conversations,
+`messages` stores completed user/assistant turns for each session, and
+`memories` stores durable facts that can optionally point back to their source
+session.
+
+Completed turns save only the user's request and the assistant's final answer
+to that session; intermediate tool exchanges and model thinking are not stored.
+When a session is resumed, the most recent 12 user/assistant messages are added
+to the next request as conversational context. Sessions and long-term memories
+are separate; durable memory entries can reference the session they came from.
+
 At startup, `Agent.py` creates a `RagPipelineConnector` over `memory.md`. The
 pipeline chunks and embeds the document, builds an in-memory FAISS index, and
 retrieves up to three relevant chunks for a user request. Each retrieved chunk
 is limited to 900 characters before it is added to the model's system message.
 Tool results included in subsequent model messages are limited to 1,600
-characters, and the agent stops after six tool rounds(can be configure inside the config.py).
+characters, and the maximum tool rounds are configured in `config.py`.
 
 Before each user request, the agent also searches the SQLite database for up to
 three matching active, unexpired long-term memories and includes them in the
@@ -193,9 +211,10 @@ memory-file update.
 
 After a completed response, the application makes a separate structured memory
 review call. It saves only concise durable preferences, decisions, project
-facts, or tool-confirmed outcomes to SQLite; routine requests and full
-transcripts are not stored. Invalid extraction or database errors are reported
-instead of being presented as a successful save. The model can also use
+facts, or tool-confirmed outcomes to SQLite; routine requests are not promoted
+to long-term memory and full tool transcripts are not stored. Invalid extraction
+or database errors are reported instead of being presented as a successful
+save. The model can also use
 `persist_long_term_memory` during a task when a durable fact must be saved
 before the final response.
 
