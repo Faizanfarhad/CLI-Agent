@@ -1,6 +1,6 @@
 import docker
 from typing import Optional
-
+from pathlib import Path
 
 class AgentLinuxEnv:
     def __init__(self, image_name="agent-sandbox"):
@@ -18,11 +18,11 @@ class AgentLinuxEnv:
             mem_limit="512m",      # Prevents agent from freezing host RAM
             nano_cpus=1000000000,   # Limits agent to 1 CPU core
             volumes={
-    "/mnt/storage/Agent_using_MCP": {
+    str(Path(__file__).parent): {
         "bind": "/workspace",
         "mode": "ro",
     },
-    "/mnt/storage/Agent_using_MCP/testing": {
+    str(Path(__file__).parent /"testing"): {
         "bind": "/workspace/testing",
         "mode": "rw",
     },

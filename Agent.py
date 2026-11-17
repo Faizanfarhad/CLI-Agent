@@ -38,6 +38,10 @@ from tools.save_memory import (
     search_long_term_memories,
 )
 
+from tools.voice_chat import (
+    speak_model
+) 
+
 #load the docker env for the agent playground
 playground_env = AgentLinuxEnv()
 playground_env.start()
@@ -47,6 +51,32 @@ active_session_id: int | None = None
 MEMORY_DIR.mkdir(parents=True, exist_ok=True)
 MEMORY_FILE.touch(exist_ok=True)
 pipeline = RagPipelineConnector(doc_path=MEMORY_FILE,device="cpu",chunk_overlap=30)
+
+def text_to_voice():
+    return {
+        "type": "function",
+        "function": {
+            "name": "text_to_voice",
+            "description": "Speak the supplied text using a voice or voice-prompt path.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Text to speak.",
+                    },
+                    "own_voice": {
+                        "type": "string",
+                        "description": (
+                            f"Optional voice name or path={OWN_VOICE_PATH} to a voice prompt. "
+                            "If omitted, speak_model uses its default voice."
+                        ),
+                    },
+                },
+                "required": ["text"],
+            },
+        },
+    }
 
 def persist_long_term_memory():
     return {
@@ -250,6 +280,7 @@ tools = [
     playground_tool(),
     get_full_path,
     persist_long_term_memory(),
+    text_to_voice(),
 ]
 available_functions = {
     #file tools
@@ -276,6 +307,9 @@ available_functions = {
 
     #long term memory tool
     "persist_long_term_memory": save_memory_for_active_session,
+    
+    #TTS mode
+    "text_to_voice" : speak_model,
 
 }
 
@@ -409,19 +443,60 @@ def chat(query, session_id: int):
 # making it work as a chatbot
 def main():
     global active_session_id
-
+    global MODEL_NAME
+    
     active_session_id = create_session()
+    availabel_commands = ["/models","/current_model","/sessions","/new","/exit","/help"]
     print(f"{'=' * 50}Ask Something{'=' * 50}")
     try:
         while True:
             query = input(
                 f"\n[session {active_session_id}] Enter query "
-                "('/sessions', '/sessions <id>', '/new', '/exit'): "
+                "('/help'): "
             ).strip()
+            
+            if query.lower() == "/help":
+                print("="*10,"Commands available","="*10)
+                print("/sessions : for checkign the previous sessions")
+                print("/sessions <id> : for switching to the sessions id")
+                print("/models : for checking the available models(model should be add/update by manually in config.py)")
+                print("/models <id> : for swtiching to that model id")
+                print("/current_model : for checking the current model that is getting used")
+                print("/new : for creating the new session")
+                print("/exit : for exiting from the program\n")
+                print("""information regarding the /models command : this should be called before calling the model otherwise it can't be switched to the other model  \nEx: after running the Agent.py you should use the /models to see the list of available model(should be update manually by you in the config.py on the list variable called models_availabel) and for switching to that model just use /model <id> """)
+                continue
+            
+            
+            ########for checking current model that is getting used 
+            if query.lower() == "/current_model":
+                print(f"Current Model is : {MODEL_NAME}")
+                continue
+            
+            ########Changing the models in the start of the session
+            if query.lower() == "/models":
+                print("=====Pls make sure to use this method before calling the model=====")
+                for i,m in enumerate(models_availabel):
+                    print(f"{i}. {m}")
+                continue
+            if query.startswith("/models "):
+                try:
+                    model_id = int(query.removeprefix("/models ").strip())
+                    if model_id > len(models_availabel):
+                        print("Model id dosent exist ,please make sure you enterned correct id")
+                        continue
+                    
+                    MODEL_NAME = models_availabel[model_id]
+                    continue
+                except Exception as e:
+                    print(f"Error : {e}")
+            
+            ########Quitting the Agent Loop
             if query.lower() == "/exit":
                 print("\nUnderstood. Closing session. Have a great day!")
                 break
-
+            
+            ########For checking the previous sessions
             if query == "/sessions":
                 sessions = list_sessions()
                 if not sessions:
@@ -434,7 +509,8 @@ def main():
                         f"(last active {session['last_activity']})"
                     )
                 continue
-
+            
+            ########For switching to the previous sessions 
             if query.startswith("/sessions "):
                 try:
                     selected_session_id = int(query.removeprefix("/sessions ").strip())
@@ -449,15 +525,17 @@ def main():
                 active_session_id = selected_session_id
                 print(f"Resumed session {active_session_id}.")
                 continue
-
+            
+            #######For creating the new session 
             if query == "/new":
                 close_session(active_session_id)
                 active_session_id = create_session()
                 print(f"Started new session {active_session_id}.")
                 continue
-
-            if query.startswith("/"):
-                print("Unknown command. Use /sessions, /sessions <id>, /new, or /exit.")
+            
+            
+            if query.startswith("/") and query.split(maxsplit=1)[0].lower() not in availabel_commands:
+                print("Unknown command. Use /help to see the available commands")
                 continue
 
             chat(query, active_session_id)

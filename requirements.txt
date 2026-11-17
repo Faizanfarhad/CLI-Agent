@@ -7,3 +7,5 @@ llama-index-core
 numpy
 torch
 sqlite3
+pocket_tts
+scipy
