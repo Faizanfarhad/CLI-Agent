@@ -1,10 +1,9 @@
 
 # CLI Agent 
 
-A command-line AI agent that uses a locally running Ollama model, streams responses
-and thinking output, and can call local file-system tools and a Docker playground.
-The project also includes a retrieval-augmented generation (RAG) pipeline for
-searching saved project memory.
+A local Ollama CLI agent with streaming responses, thinking output, tool calling,
+Docker sandboxed execution, session-based chat history, SQLite long-term memory,
+and RAG-based retrieval over Markdown notes.
 
 > **Warning:** This agent can read, write, move, or delete files and execute shell
 > commands inside its Docker playground. Review tool requests and generated commands
@@ -13,14 +12,14 @@ searching saved project memory.
 
 ## Features
 
-- Streams model responses and thinking output from Ollama.
-- Uses Ollama tool calls to read and write files, inspect directories, and run
-  shell commands or Python in a Docker container.
-- Retrieves relevant memory chunks for each user request.
-- Limits model context (`num_ctx`), generated tokens (`num_predict`), retrieved
-  memory, tool output, and tool-call rounds in `Agent.py`.
-- Uses `testing/` as the default destination for newly generated files and test
-  artifacts when no destination is specified. A user-specified path takes priority.
+- Streams Ollama responses and thinking output.
+- Dispatches structured Ollama tool calls to file, OS, Docker, memory, and text-to-speech tools.
+- Runs one reusable Docker playground container for each agent process.
+- Creates a SQLite session for the program run and lets users list or resume previous sessions.
+- Stores only the final user/assistant answer for each completed chat turn; tool calls and model thinking are not added to session history.
+- Searches SQLite and a FAISS RAG index before adding relevant context to a request.
+- Automatically reviews completed answers for durable facts and saves them to SQLite with validation and duplicate checks.
+- Uses `testing/` as the default destination for new files and test artifacts.
 
 ## Requirements
 - Linux.
@@ -38,11 +37,13 @@ searching saved project memory.
 Edit `config.py`:
 
 ```python
-MODEL_NAME = "gemma27b-4bit"
+models_availabel = ["gpt20b", "gemma27b-4bit", "qwen3.8-27b"]
+MODEL_NAME = models_availabel[0]
 ```
 
-Set this to a model name that is already available in your Ollama installation.
-Check available local models with:
+Add names of models already available in your Ollama installation to
+`models_availabel`. Switch models while the agent is running with `/models <id>`
+or change `MODEL_NAME` before startup. Check available local models with:
 
 ```bash
 ollama list
@@ -58,12 +59,10 @@ ollama run gemma27b-4bit
 If Ollama is already managed by systemd, it may already be running. Do not start a
 second server on the same address.
 
-The current request options are set in `Agent.py`, including `num_ctx=5120`,
-`num_predict=4096`, `keep_alive="20m"`, and `num_thread=9`. The context setting
-limits the combined prompt, tools, retrieved memory, and conversation messages.
-`num_predict` limits generated output; raising it does **not** enlarge the context
-window. These values may need adjustment for the selected model and available
-memory.
+The current chat request options are set in `Agent.py`, including `num_ctx=5120`,
+`keep_alive="20m"`, and `num_thread=9`. The context setting limits the combined
+prompt, tools, retrieved memory, and conversation messages. The maximum number
+of tool rounds and memory retrieval limits are configured in `config.py`.
 
 ## Build the Docker playground image
 
@@ -120,15 +119,29 @@ the retrieval code imports it directly. If pip cannot find a compatible PyTorch
 wheel for your platform, install the appropriate build following the official
 PyTorch installation instructions.
 
-After installing dependencies, make sure Ollama is running, build the Docker
-playground image as described above, and run the agent from the repository root:
+After installing dependencies, make sure Ollama is running and build the Docker
+playground image as described above. Run the agent from the repository root so
+imports such as `from config import ...` resolve correctly:
 
 ```bash
 python Agent.py
 ```
 
-Type a request at the prompt. Enter `/exit` to leave the loop and stop the
-playground container.
+Type a request at the prompt. Use `/help` to print the CLI commands; use `/exit`
+to close the active session and stop the playground container.
+
+### CLI commands
+
+| Command | Purpose |
+| --- | --- |
+| `/help` | Show available commands. |
+| `/models` | List model names configured in `config.py`. |
+| `/models <id>` | Switch to a listed model ID. |
+| `/current_model` | Show the active model name. |
+| `/sessions` | List previous sessions that contain saved chats. |
+| `/sessions <id>` | Resume a listed session and close the active session. |
+| `/new` | Close the active session and start a new one. |
+| `/exit` | Close the session and stop the playground container. |
 
 ## Available tools
 
@@ -145,6 +158,8 @@ The model is given these tools by `Agent.py`:
 | `find(command)` | Run `find` with the supplied argument list. |
 | `get_full_path(suffix_path)` | Construct a path from the current directory and a suffix. |
 | `playground(...)` | Run shell commands or Python inside the session's Docker container. |
+| `persist_long_term_memory(content, category, importance)` | Save one validated durable SQLite memory entry for the active session. |
+| `text_to_voice(text, own_voice=None)` | Generate speech and play it through the host audio player. |
 
 The source also defines other OS helpers, but a helper is only available to the
 model if it appears in the `tools` list and has a matching entry in
@@ -154,16 +169,33 @@ model if it appears in the `tools` list and has a matching entry in
 
 - Shell commands and Python code run in a Docker container, not directly on the
   host.
+- The repository is mounted read-only at `/workspace`.
+- `testing/` is mounted read-write at `/workspace/testing`.
+- Shell and Python execution currently use `/playground` as the container working
+  directory, while the repository mount remains available under `/workspace`.
 - Commands run with `/playground` as their working directory.
 - The container is started with Docker bridge networking. Outbound network
   access depends on Docker and host network configuration; it is not guaranteed.
 - The container has a 512 MB memory limit and one CPU core.
-- The container does not mount the repository's `testing/` directory. Files
-  written inside `/playground` are not automatically saved to the host or
-  repository. Copy or recreate desired deliverables in the host workspace using
-  the file tools.
 - Use the playground for testing generated code and commands when practical.
   Verify the returned exit code and output before reporting success.
+
+Files written through `/workspace/testing` can be saved to the host testing
+directory. Files created elsewhere in the container need to be copied back using
+the tool loop or recreated on the host.
+
+## Text-to-speech
+
+The optional `text_to_voice` tool uses `pocket_tts`, `scipy`, and `aplay` to
+generate `testing/output.wav` and play it.
+
+- Set `voice_path` in `config.py` to a valid local audio prompt, or leave it as
+  `None`/a missing path to use Pocket TTS's default voice.
+- Pass `own_voice` only as a valid audio-file path or omit it.
+- Do not pass a human-language code or a built-in voice label such as `eve` as
+  `own_voice`; that argument is a file-path argument, not a voice-name lookup.
+- Run the agent on a Linux desktop with an available ALSA audio device because
+  `aplay` is used to play the output.
 
 ## Persistent memory and RAG
 
@@ -229,7 +261,9 @@ Agent_using_MCP/
 ├── tools/
 │   ├── file_tools.py                # Read, PDF extraction, and write tools
 │   ├── os_tools.py                  # Local operating-system helpers
-│   └── agent_playground.py          # Docker playground integration
+│   ├── agent_playground.py          # Docker playground integration
+│   ├── save_memory.py               # SQLite sessions and long-term memory
+│   └── voice_chat.py                # Pocket TTS speech generation
 ├── relevantMemoryFetch/
 │   ├── rag_pipeline.py              # Memory chunking, embedding, retrieval
 │   └── rag_tools/                   # Chunking, embeddings, and FAISS helpers
@@ -258,8 +292,16 @@ playground helper.
 An error such as `unexpected end of JSON input` means the server received
 incomplete tool arguments. Check the Ollama logs for truncation indicators such
 as `truncated = 1`. Keep prompts, retrieved memory, tool schemas, tool output, and
-requested tool arguments concise. Increasing `num_predict` does not increase
+requested tool arguments concise. Increasing output limits does not increase
 `num_ctx`; increasing context may require additional model/system memory.
+
+### Text-to-speech cannot open the voice file
+
+If Pocket TTS reports `LibsndfileError` or `Error opening ...`, verify that
+`own_voice` is a real audio file path and that the file exists. Human-readable
+voice labels are not valid file paths for the `own_voice` argument. If no custom
+voice is needed, omit `own_voice` or pass `None`. Set `voice_path` in `config.py`
+only to an existing audio prompt file.
 
 ### CUDA illegal memory access
 
