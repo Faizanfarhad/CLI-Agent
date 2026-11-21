@@ -29,6 +29,7 @@ from tools.agent_playground import AgentLinuxEnv,playground
 from tools.save_memory import (
     close_session,
     create_session,
+    delete_session,
     list_sessions,
     load_recent_messages,
     resume_session,
@@ -39,7 +40,8 @@ from tools.save_memory import (
 )
 
 from tools.voice_chat import (
-    speak_model
+    speak_model,
+    listen_to_mic
 ) 
 
 #load the docker env for the agent playground
@@ -68,7 +70,7 @@ def text_to_voice():
                     "own_voice": {
                         "type": "string",
                         "description": (
-                            f"Optional voice name or path={OWN_VOICE_PATH} to a voice prompt. "
+                            f" if path of own_voice:`{OWN_VOICE_PATH}` is None or empty then Choose a own_voice from the `{available_voices}`"
                             "If omitted, speak_model uses its default voice."
                         ),
                     },
@@ -446,7 +448,15 @@ def main():
     global MODEL_NAME
     
     active_session_id = create_session()
-    availabel_commands = ["/models","/current_model","/sessions","/new","/exit","/help"]
+    availabel_commands = [
+        "/models",
+        "/current_model",
+        "/sessions",
+        "/delete_session",
+        "/new",
+        "/exit",
+        "/help",
+    ]
     print(f"{'=' * 50}Ask Something{'=' * 50}")
     try:
         while True:
@@ -456,15 +466,19 @@ def main():
             ).strip()
             
             if query.lower() == "/help":
+                print("\n")
                 print("="*10,"Commands available","="*10)
                 print("/sessions : for checkign the previous sessions")
                 print("/sessions <id> : for switching to the sessions id")
+                print("/delete_session <id> : permanently delete a session and its chat history")
                 print("/models : for checking the available models(model should be add/update by manually in config.py)")
                 print("/models <id> : for swtiching to that model id")
                 print("/current_model : for checking the current model that is getting used")
+                print("/mic : use for giving the voice input")
                 print("/new : for creating the new session")
                 print("/exit : for exiting from the program\n")
                 print("""information regarding the /models command : this should be called before calling the model otherwise it can't be switched to the other model  \nEx: after running the Agent.py you should use the /models to see the list of available model(should be update manually by you in the config.py on the list variable called models_availabel) and for switching to that model just use /model <id> """)
+                print("\n\n")
                 continue
             
             
@@ -525,6 +539,48 @@ def main():
                 active_session_id = selected_session_id
                 print(f"Resumed session {active_session_id}.")
                 continue
+
+            command_parts = query.split(maxsplit=1)
+            if command_parts and command_parts[0].lower() == "/delete_session":
+                if len(command_parts) != 2:
+                    print("Usage: /delete_session <id>")
+                    continue
+                try:
+                    session_id_to_delete = int(command_parts[1])
+                    if session_id_to_delete < 1:
+                        raise ValueError("Session ID must be a positive integer.")
+                except ValueError as error:
+                    print(f"Invalid session ID: {error}")
+                    continue
+
+                confirmation = input(
+                    f"Delete session {session_id_to_delete} and its chat history? "
+                    "This cannot be undone. Type 'yes' to confirm: "
+                ).strip().lower()
+                if confirmation != "yes":
+                    print("Session deletion cancelled.")
+                    continue
+
+                replacement_session_id = None
+                try:
+                    if session_id_to_delete == active_session_id:
+                        replacement_session_id = create_session()
+                    delete_session(session_id_to_delete)
+                except (ValueError, sqlite3.Error) as error:
+                    if replacement_session_id is not None:
+                        close_session(replacement_session_id)
+                    print(f"Could not delete session: {error}")
+                    continue
+
+                if replacement_session_id is not None:
+                    active_session_id = replacement_session_id
+                    print(
+                        f"Deleted the active session. Started replacement session "
+                        f"{active_session_id}."
+                    )
+                else:
+                    print(f"Deleted session {session_id_to_delete}.")
+                continue
             
             #######For creating the new session 
             if query == "/new":
@@ -533,6 +589,15 @@ def main():
                 print(f"Started new session {active_session_id}.")
                 continue
             
+            ######for taking input from the mic 
+            if query == "/mic":
+                mic_query = listen_to_mic()
+                if mic_query is not None or mic_query != "":
+                    chat(mic_query, active_session_id)
+                    continue
+                else:
+                    print(f"query is None ,Check you mic")
+                    continue
             
             if query.startswith("/") and query.split(maxsplit=1)[0].lower() not in availabel_commands:
                 print("Unknown command. Use /help to see the available commands")

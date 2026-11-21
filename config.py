@@ -1,18 +1,30 @@
 from pathlib import Path
-
+import os 
 
 #######Add your local downloaded model in this list 
-models_availabel = ["gpt20b","gemma27b-4bit","qwen3.8-27b"]
+models_availabel = ["gpt20b","gemma27b-4bit","qwen3.8-27b"]  #Update this to see the available models in the /models commmand
 
 #default is first model 
-MODEL_NAME = models_availabel[0]
+MODEL_NAME = models_availabel[0] #and use the /models <id> (id would be the index of the model) to switch on that 
 
-MEMORY_DIR = Path(__file__).parent / "savedMem"
 
+
+MEMORY_DIR = Path(__file__).parent / "savedMem" 
+
+if not Path.exists(MEMORY_DIR):
+        MEMORY_DIR.mkdir(parents=True,exist_ok=True)
 
 VOICE_CHAT_DIR = MEMORY_DIR / "voice_chat_saved"
+if not Path.exists(VOICE_CHAT_DIR):
+        VOICE_CHAT_DIR.mkdir(parents=True,exist_ok=True)
+
 MEMORY_FILE = MEMORY_DIR / "memory.md"
+if not Path.exists(MEMORY_FILE):
+        MEMORY_FILE.touch(exist_ok=True)
+
 TESTING_DIR = Path(__file__).parent / "testing"
+if not Path.exists(TESTING_DIR):
+        TESTING_DIR.mkdir(parents=True,exist_ok=True)
 
 ### max_tool cycle , max top k chunks , max memory char should be present in fetched relevant memory , trim the result if it more then  MAX_TOOL_RESULT_CHARS
 MAX_TOOL_ROUNDS = 1000
@@ -21,8 +33,32 @@ MAX_MEMORY_CHARS_PER_CHUNK = 900
 MAX_TOOL_RESULT_CHARS = 1600
 
 # your own voice path for the model to speak otherwise it has many other voices to speak  
+available_voices = ['bill_boerst','caro_davy','charles','cosette','eponine','eve'
+        'fantine',
+        'george' ,
+        'jane' ,
+        'jean' ,
+        'javert' ,
+        'marius' ,
+        'mary',
+        'michael',
+        'paul' ,
+        'peter_yearsley',
+        'stuart_bell' ,
+        'vera' 
+        ]
 voice_path = "testing/myvoice.wav"
 OWN_VOICE_PATH =   voice_path if Path(voice_path).exists() else None
+
+##lisening components
+ASR_MODEL_DIR = "/mnt/storage/localModels/qwen3-ASR-0.6b" #local path of the ASR model
+SAMPLE_RATE = 16000          
+CHUNK_SAMPLES = 512          # 32 ms per chunk (required by Silero VAD at 16kHz)
+SILENCE_CHUNKS = 22          # ~700 ms of silence ends the utterance
+PRE_BUFFER_CHUNKS = 10       # ~320 ms lookback so start of speech isn't clipped
+SPEECH_THRESHOLD = 0.5       
+
+
 
 
 SYSTEM_PROMPT = f"""You are an AI agent. Help with the user's request using the available tools(current timeline is Nov-2026).

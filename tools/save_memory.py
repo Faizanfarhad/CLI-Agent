@@ -253,6 +253,30 @@ def close_session(
         connection.close()
 
 
+def delete_session(
+    session_id: int,
+    db_path: str | Path = DATABASE_PATH,
+) -> None:
+    """Delete a session and its messages while preserving linked long-term memories."""
+    if session_id < 1:
+        raise ValueError("Session ID must be a positive integer.")
+
+    connection = get_connection(db_path)
+    try:
+        cursor = connection.execute(
+            "DELETE FROM sessions WHERE id = ?",
+            (session_id,),
+        )
+        if cursor.rowcount == 0:
+            raise ValueError(f"Session {session_id} does not exist.")
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
 def save_long_term_memory(
     content: str,
     category: str = "other",

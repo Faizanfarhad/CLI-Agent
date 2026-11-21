@@ -138,8 +138,10 @@ to close the active session and stop the playground container.
 | `/models` | List model names configured in `config.py`. |
 | `/models <id>` | Switch to a listed model ID. |
 | `/current_model` | Show the active model name. |
+| `/mic` | Record one utterance from the microphone and transcribe it. |
 | `/sessions` | List previous sessions that contain saved chats. |
 | `/sessions <id>` | Resume a listed session and close the active session. |
+| `/delete_session <id>` | Permanently delete a session and its chat history after confirmation. |
 | `/new` | Close the active session and start a new one. |
 | `/exit` | Close the session and stop the playground container. |
 
@@ -197,6 +199,18 @@ generate `testing/output.wav` and play it.
 - Run the agent on a Linux desktop with an available ALSA audio device because
   `aplay` is used to play the output.
 
+### Microphone input
+
+Use `/mic` to record a single utterance. Silero VAD detects speech and
+Faster-Whisper's `small` model transcribes it on CPU. The model may be downloaded
+the first time it is initialized. Microphone capture requires a working audio
+input device and the PortAudio system library used by `sounddevice`; package
+names vary by Linux distribution.
+
+`voice_chat.py` also loads an `AutoProcessor` from `ASR_MODEL_DIR`. If startup
+fails while loading it, verify that this setting in `config.py` points to a
+compatible local model directory.
+
 ## Persistent memory and RAG
 
 The default memory paths are defined in `config.py`:
@@ -215,7 +229,8 @@ Each program run starts a new conversation session. The CLI accepts:
 The SQLite tables have separate roles: `sessions` identifies conversations,
 `messages` stores completed user/assistant turns for each session, and
 `memories` stores durable facts that can optionally point back to their source
-session.
+session. Deleting a session cascades to its messages; linked long-term memories
+are preserved and detached from the deleted session.
 
 Completed turns save only the user's request and the assistant's final answer
 to that session; intermediate tool exchanges and model thinking are not stored.

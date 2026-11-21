@@ -1,4 +1,5 @@
 ollama
+httpx
 docker
 PyMuPDF
 sentence-transformers
@@ -6,5 +7,11 @@ faiss-cpu
 llama-index-core
 numpy
 torch
+
+# Voice generation and microphone transcription
 pocket_tts
 scipy
+sounddevice
+silero-vad
+transformers
+faster-whisper
